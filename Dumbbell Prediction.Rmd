@@ -1,0 +1,141 @@
+---
+title: "Dumbbell Prediction"
+author: "Joshua W. Adams"
+date: "11/4/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+Using tracking devices, it is now possible to collect a large amount of data about personal activity. This project uses data from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants in order to predict the manner in which they did the exercise (dumbbell lifts correctly and incorrectly in 5 different ways).
+
+## Load Required Packages
+
+We will be using Caret 6.0-86, randomForest 4.6-14, e1071 1.7-4, rattle 5.4.0, and rpart 4.1-15. This document is compiled using R 4.0.3. Also, a random seed will be set for reproducibility. In this example, I am using 1995 as the random seed but you can change the value in the following code if you want to try to get different results.
+
+```{r message=FALSE}
+# load packag
+library(caret)
+library(randomForest)
+library(e1071)
+library(rattle)
+library(rpart)
+set.seed(1995)
+```
+
+## Data Preparation
+
+The data will be pulled from a Cloudfront link, viewable in the below code. It is divided into a training set and a validation set. The training set will be used to create and test a machine learning model. The validation set will be used to test the accuracy of the machine learning model.
+
+```{r cache = TRUE, message=FALSE}
+# Download the training and test data
+if(!file.exists("pml-training.csv"))
+{
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "pml-training.csv", method = 'curl')
+}
+traindata <- read.csv("pml-training.csv", na.strings = c("NA", ""))
+if(!file.exists("pml-testing.csv"))
+{
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "pml-testing.csv", method = 'curl')
+}
+validationdata <- read.csv("pml-testing.csv")
+```
+```{r}
+str(traindata)
+```
+The data has 160 variables, but upon a closer examination, many of these variables contain NA values. These values will need to be eliminated from the tables. The first block is for the training data and the second is for the validation data.
+
+```{r cache = TRUE}
+# Make a vector of all the columns and the number of NA entries
+yesNA = sapply(traindata, function(x) {sum(is.na(x))}) 
+NAColumns = names(yesNA[yesNA > 0])  #Vector with all the columns that has NA values
+traindata = traindata[, !names(traindata) %in% NAColumns] # Remove those columns from the training set
+
+# Remove unnecessary columns in the training data (the first 7 columns)
+traindata <- traindata[, !names(traindata) %in% c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window")]
+
+# Repeat the steps with the validation data
+validationdata = validationdata[, !names(validationdata) %in% NAColumns]
+validationdata <- validationdata[, !names(validationdata) %in% c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window")]
+```
+
+Next, the training data will be split into a smaller training set and a testing set. This will be done at a 70/30 ratio and will be called training and testing.
+
+```{r cache = TRUE}
+inTrain = createDataPartition(y=traindata$classe, p=0.7, list=FALSE)
+training = traindata[inTrain,]
+testing = traindata[-inTrain,]
+```
+
+## Model 1
+The first model is going to be a classification tree.
+
+```{r cache = TRUE, message=FALSE}
+mod1 <- rpart(classe ~ ., data=training, method="class")
+fancyRpartPlot(mod1)
+```
+
+This is then validated on the testing subset and the accuracy of the model is assessed.
+
+```{r cache = TRUE, message=FALSE}
+predmod1 <- predict(mod1, testing, type = "class")
+cm1 <- confusionMatrix(predmod1, as.factor(testing$classe))
+cm1
+```
+The classification tree model is providing only a 74.7% accuracy rate, with a potential 95% confidence interval of 73.5 to 75.7%. We should see if we can improve upon this model.
+
+## Model 2
+
+A random forest model will be used for the second model. There will be a 3 folds in the cross validation model to help train a potential optimal forest for prediction
+
+
+```{r cache = TRUE}
+# instruct train to use 3-fold CV to select optimal tuning parameters
+mod2ctrl <- trainControl(method="cv", number=3, verboseIter=F)
+
+# fit model on training subset
+mod2 <- train(classe ~ ., data=training, method="rf", trControl=mod2ctrl)
+
+# check parameters
+mod2$finalModel
+```
+
+This model has 500 trees and 2 variables at each split. Now this model will be used to predict the data in the testing table, along with using a confusion matrix to demonstrate the accuracy of those predictions.
+
+```{r cache = TRUE}
+# use model to predict classe in testing subset
+predmod2 <- predict(mod2, newdata=testing)
+
+# show confusion matrix to get estimate of out-of-sample error
+cm2 <- confusionMatrix(predmod2, as.factor(testing$classe))
+mod2accuracy <- cm2$overall["Accuracy"]
+mod2accuracy
+```
+
+```{r cache = TRUE}
+plot(mod2)
+```
+
+The accuracy is 99.4%, thus the predicted accuracy for the out-of-sample error is 0.73%. Model 2 with the random forest should be a great model to use on the validation data. 
+
+Predicting validation testing data
+Finally, we use the model fit on the full training set to predict the label for the observations in the validation testing set.
+
+## Model 2 Prediction on Validation Data
+
+```{r}
+# predict on validation set
+mod2valpred <- predict(mod2, newdata=validationdata)
+mod2valpred
+```
+
+## Conclusion
+
+Model 2 using a random forest predicted the following values on the validation data set.
+
+B A B A A E D B A A B C B A E E A B B B 
